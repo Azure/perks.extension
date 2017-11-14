@@ -183,7 +183,7 @@ import { ExtensionManager, UnresolvedPackageException, InvalidPackageIdentityExc
 
   @test async "Test Start"() {
 
-    const dni = await this.extensionManager.findPackage("foo", "fearthecowboy/echo-cli");
+    const dni = await this.extensionManager.findPackage("none", "fearthecowboy/echo-cli");
     const installing = this.extensionManager.installPackage(dni, false, 5 * 60 * 1000, (installing) => {
       installing.Message.Subscribe((s, m) => { console.log(`Installer:${m}`) });
     });
