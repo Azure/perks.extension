@@ -507,11 +507,7 @@ export class ExtensionManager {
 
       // change directory
       process.chdir(this.installationPath);
-
-
-
       progress.Progress.Dispatch(25);
-
 
       // set the prefix to the target location
       cc.localPrefix = extension.location;
@@ -557,7 +553,7 @@ export class ExtensionManager {
           const i = ip_release;
           ip_release = null;
           await i();
-          await Lock.read(this.installationPath);
+          this.readLockRelease = await Lock.read(this.installationPath)
           await Delay(1000);
           await ExtensionManager.criticalSection.exit();
         }
@@ -603,7 +599,7 @@ export class ExtensionManager {
         const i = ip_release;
         ip_release = null;
         await i();
-        await Lock.read(this.installationPath);
+        this.readLockRelease = await Lock.read(this.installationPath);
         await ExtensionManager.criticalSection.exit();
       }
 
