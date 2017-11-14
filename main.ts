@@ -478,7 +478,13 @@ export class ExtensionManager {
     const progress = new Progress(progressInit);
     let release: release | null = null;
 
+
     await ExtensionManager.criticalSection.enter();
+
+    if (!await exists(this.installationPath)) {
+      await mkdir(this.installationPath);
+    }
+
     const extension = new Extension(pkg, this.installationPath);
     const cwd = process.cwd();
 
@@ -489,11 +495,12 @@ export class ExtensionManager {
     let ip_release = await Lock.waitForExclusive(this.installationPath);
 
     try {
-      const cc = <any>await npm_config;
-
-      if (!exists(this.installationPath)) {
-        await mkdir(this.installationPath);
+      if (!ip_release) {
+        await ExtensionManager.criticalSection.exit();
+        throw new Exception(`Unable to lock Installation Path '${this.installationPath}'`);
       }
+
+      const cc = <any>await npm_config;
 
       // change directory
       process.chdir(this.installationPath);
@@ -548,8 +555,8 @@ export class ExtensionManager {
           ip_release = null;
           await i();
           await Lock.read(this.installationPath);
-          process.chdir(cwd);
-          ExtensionManager.criticalSection.exit();
+
+          await ExtensionManager.criticalSection.exit();
         }
 
         await results;
@@ -594,7 +601,7 @@ export class ExtensionManager {
         ip_release = null;
         await i();
         await Lock.read(this.installationPath);
-        ExtensionManager.criticalSection.exit();
+        await ExtensionManager.criticalSection.exit();
       }
 
     }
