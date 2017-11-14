@@ -489,17 +489,13 @@ export class ExtensionManager {
     let ip_release = await Lock.waitForExclusive(this.installationPath);
 
     try {
-
-
       const cc = <any>await npm_config;
-
 
       if (!exists(this.installationPath)) {
         await mkdir(this.installationPath);
       }
 
       // change directory
-
       process.chdir(this.installationPath);
 
       progress.Start.Dispatch(null);
@@ -552,6 +548,7 @@ export class ExtensionManager {
           ip_release = null;
           await i();
           await Lock.read(this.installationPath);
+          process.chdir(cwd);
           ExtensionManager.criticalSection.exit();
         }
 
@@ -582,7 +579,6 @@ export class ExtensionManager {
       throw new PackageInstallationException(pkg.name, pkg.version, `${e}`);
     }
     finally {
-      process.chdir(cwd);
       progress.Progress.Dispatch(100);
       progress.End.Dispatch(null);
       if (release) {
@@ -591,6 +587,8 @@ export class ExtensionManager {
 
       // if we failed to release our global lock before...
       if (ip_release) {
+        process.chdir(cwd);
+
         // release the global lock
         const i = ip_release;
         ip_release = null;
