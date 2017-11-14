@@ -10,7 +10,7 @@ require.cache[require.resolve('npm/lib/utils/output')].exports = () => { };
 import { config, load, commands } from 'npm'
 import { spawn, ChildProcess } from 'child_process'
 import { readdir, isFile, readFile, exists, isDirectory, mkdir, Lock, rmdir, release } from '@microsoft.azure/async-io'
-import { Exception, shallowCopy, CriticalSection } from '@microsoft.azure/tasks'
+import { Exception, shallowCopy, CriticalSection, Delay } from '@microsoft.azure/tasks'
 import { resolve as npmResolvePackage } from 'npm-package-arg'
 import { homedir, arch } from 'os';
 import * as semver from 'semver';
@@ -477,9 +477,10 @@ export class ExtensionManager {
   public async installPackage(pkg: Package, force?: boolean, maxWait: number = 5 * 60 * 1000, progressInit: Subscribe = () => { }): Promise<Extension> {
     const progress = new Progress(progressInit);
     let release: release | null = null;
-
+    progress.Start.Dispatch(null);
 
     await ExtensionManager.criticalSection.enter();
+    progress.Message.Dispatch("In Critical Section.");
 
     if (!await exists(this.installationPath)) {
       await mkdir(this.installationPath);
@@ -492,20 +493,22 @@ export class ExtensionManager {
     await this.readLockRelease();
 
     // wait for an exclusive lock
+    progress.Message.Dispatch("Getting exclusive lock.");
     let ip_release = await Lock.waitForExclusive(this.installationPath);
 
     try {
       if (!ip_release) {
+        progress.Message.Dispatch("Didn't get lock.");
         await ExtensionManager.criticalSection.exit();
         throw new Exception(`Unable to lock Installation Path '${this.installationPath}'`);
       }
-
+      progress.Message.Dispatch("Got Lock!.");
       const cc = <any>await npm_config;
 
       // change directory
       process.chdir(this.installationPath);
 
-      progress.Start.Dispatch(null);
+
 
       progress.Progress.Dispatch(25);
 
@@ -555,7 +558,7 @@ export class ExtensionManager {
           ip_release = null;
           await i();
           await Lock.read(this.installationPath);
-
+          await Delay(1000);
           await ExtensionManager.criticalSection.exit();
         }
 
