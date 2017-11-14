@@ -506,9 +506,6 @@ export class ExtensionManager {
 
       progress.Progress.Dispatch(25);
 
-      progress.Message.Dispatch("[FYI- npm does not currently support progress... this may take a few moments]");
-
-
 
       // set the prefix to the target location
       cc.localPrefix = extension.location;
@@ -535,6 +532,7 @@ export class ExtensionManager {
         }
       }
 
+      progress.Message.Dispatch("[FYI- npm does not currently support progress... this may take a few moments]");
       // create the folder
       progress.NotifyMessage(`Creating target folder: ${extension.location}`);
       await mkdir(extension.location);
@@ -550,11 +548,12 @@ export class ExtensionManager {
 
         if (ip_release) {
           // release the global lock
-          const releasing = ip_release().then(async () => { await Lock.read(this.installationPath) });
+          const i = ip_release;
           ip_release = null;
-          await releasing;
+          await i();
+          await Lock.read(this.installationPath);
+          ExtensionManager.criticalSection.exit();
         }
-        ExtensionManager.criticalSection.exit();
 
         await results;
         progress.NotifyMessage(`npm install completed ${pkg.name}, ${pkg.version}`);
@@ -590,12 +589,16 @@ export class ExtensionManager {
         await release();
       }
 
+      // if we failed to release our global lock before...
       if (ip_release) {
         // release the global lock
-        const releasing = ip_release().then(async () => { await Lock.read(this.installationPath) });
+        const i = ip_release;
         ip_release = null;
-        await releasing;
+        await i();
+        await Lock.read(this.installationPath);
+        ExtensionManager.criticalSection.exit();
       }
+
     }
   }
 
