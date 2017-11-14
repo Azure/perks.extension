@@ -480,7 +480,6 @@ export class ExtensionManager {
     progress.Start.Dispatch(null);
 
     await ExtensionManager.criticalSection.enter();
-    progress.Message.Dispatch("In Critical Section.");
 
     if (!await exists(this.installationPath)) {
       await mkdir(this.installationPath);
@@ -493,16 +492,14 @@ export class ExtensionManager {
     await this.readLockRelease();
 
     // wait for an exclusive lock
-    progress.Message.Dispatch("Getting exclusive lock.");
     let ip_release = await Lock.waitForExclusive(this.installationPath);
 
     try {
       if (!ip_release) {
-        progress.Message.Dispatch("Didn't get lock.");
         await ExtensionManager.criticalSection.exit();
         throw new Exception(`Unable to lock Installation Path '${this.installationPath}'`);
       }
-      progress.Message.Dispatch("Got Lock!.");
+
       const cc = <any>await npm_config;
 
       // change directory
@@ -536,7 +533,6 @@ export class ExtensionManager {
 
       progress.Message.Dispatch("[FYI- npm does not currently support progress... this may take a few moments]");
       // create the folder
-      progress.NotifyMessage(`Creating target folder: ${extension.location}`);
       await mkdir(extension.location);
 
       // acquire the write lock if we don't have it already
