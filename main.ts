@@ -476,28 +476,40 @@ export class ExtensionManager {
 
   public async installPackage(pkg: Package, force?: boolean, maxWait: number = 5 * 60 * 1000, progressInit: Subscribe = () => { }): Promise<Extension> {
     const progress = new Progress(progressInit);
-
-    await ExtensionManager.criticalSection.enter();
-
-    const cc = <any>await npm_config;
-    const extension = new Extension(pkg, this.installationPath);
-
-    if (!exists(this.installationPath)) {
-      await mkdir(this.installationPath);
-    }
-
-    // change directory
-    const cwd = process.cwd();
-    process.chdir(this.installationPath);
-
-    progress.Start.Dispatch(null);
-
-    progress.Progress.Dispatch(25);
-
-    progress.Message.Dispatch("[FYI- npm does not currently support progress... this may take a few moments]");
     let release: release | null = null;
 
+    await ExtensionManager.criticalSection.enter();
+    const extension = new Extension(pkg, this.installationPath);
+    const cwd = process.cwd();
+
+    // release the read lock on the folder
+    await this.readLockRelease();
+
+    // wait for an exclusive lock
+    let ip_release = await Lock.waitForExclusive(this.installationPath);
+
     try {
+
+
+      const cc = <any>await npm_config;
+
+
+      if (!exists(this.installationPath)) {
+        await mkdir(this.installationPath);
+      }
+
+      // change directory
+
+      process.chdir(this.installationPath);
+
+      progress.Start.Dispatch(null);
+
+      progress.Progress.Dispatch(25);
+
+      progress.Message.Dispatch("[FYI- npm does not currently support progress... this may take a few moments]");
+
+
+
       // set the prefix to the target location
       cc.localPrefix = extension.location;
       cc.globalPrefix = extension.location;
@@ -535,7 +547,15 @@ export class ExtensionManager {
         progress.NotifyMessage(`Running  npm install for ${pkg.name}, ${pkg.version}`);
 
         const results = npmInstall(pkg.name, pkg.version, extension.source, force || false);
+
+        if (ip_release) {
+          // release the global lock
+          const releasing = ip_release().then(async () => { await Lock.read(this.installationPath) });
+          ip_release = null;
+          await releasing;
+        }
         ExtensionManager.criticalSection.exit();
+
         await results;
         progress.NotifyMessage(`npm install completed ${pkg.name}, ${pkg.version}`);
       } else {
@@ -568,6 +588,13 @@ export class ExtensionManager {
       progress.End.Dispatch(null);
       if (release) {
         await release();
+      }
+
+      if (ip_release) {
+        // release the global lock
+        const releasing = ip_release().then(async () => { await Lock.read(this.installationPath) });
+        ip_release = null;
+        await releasing;
       }
     }
   }
