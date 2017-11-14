@@ -1,6 +1,6 @@
 {
   "name": "@microsoft.azure/extension",
-  "version": "2.0.4",
+  "version": "2.0.0",
   "description": "NPM-Based extension aquisition (for Azure Open Source Projects)",
   "engines": {
     "node": ">=7.10.0"
@@ -33,12 +33,12 @@
   "readme": "https://github.com/Azure/perks.extension/readme.md",
   "devDependencies": {
     "@types/node": "^8.0.51",
-    "@types/npm": "^2.0.28",
-    "mocha": "3.2.0",
-    "mocha-typescript": "^1.1.4",
     "shx": "^0.2.2",
     "typescript": "^2.6.1",
-    "yarn": "^1.3.2"
+    "yarn": "^1.3.2",
+    "mocha": "3.2.0",
+    "mocha-typescript": "^1.1.4",
+    "@types/npm": "^2.0.28"
   },
   "dependencies": {
     "@microsoft.azure/async-io": "^2.0.7",
