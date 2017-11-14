@@ -10,7 +10,7 @@ require.cache[require.resolve('npm/lib/utils/output')].exports = () => { };
 import { config, load, commands } from 'npm'
 import { spawn, ChildProcess } from 'child_process'
 import { readdir, isFile, readFile, exists, isDirectory, mkdir, Lock, rmdir, release } from '@microsoft.azure/async-io'
-import { Exception, shallowCopy, CriticalSection } from '@microsoft.azure/tasks'
+import { Exception, shallowCopy, CriticalSection, Delay } from '@microsoft.azure/tasks'
 import { resolve as npmResolvePackage } from 'npm-package-arg'
 import { homedir, arch } from 'os';
 import * as semver from 'semver';
@@ -476,28 +476,36 @@ export class ExtensionManager {
 
   public async installPackage(pkg: Package, force?: boolean, maxWait: number = 5 * 60 * 1000, progressInit: Subscribe = () => { }): Promise<Extension> {
     const progress = new Progress(progressInit);
+    let release: release | null = null;
+    progress.Start.Dispatch(null);
 
     await ExtensionManager.criticalSection.enter();
 
-    const cc = <any>await npm_config;
-    const extension = new Extension(pkg, this.installationPath);
-
-    if (!exists(this.installationPath)) {
+    if (!await exists(this.installationPath)) {
       await mkdir(this.installationPath);
     }
 
-    // change directory
+    const extension = new Extension(pkg, this.installationPath);
     const cwd = process.cwd();
-    process.chdir(this.installationPath);
 
-    progress.Start.Dispatch(null);
+    // release the read lock on the folder
+    await this.readLockRelease();
 
-    progress.Progress.Dispatch(25);
-
-    progress.Message.Dispatch("[FYI- npm does not currently support progress... this may take a few moments]");
-    let release: release | null = null;
+    // wait for an exclusive lock
+    let ip_release = await Lock.waitForExclusive(this.installationPath);
 
     try {
+      if (!ip_release) {
+        await ExtensionManager.criticalSection.exit();
+        throw new Exception(`Unable to lock Installation Path '${this.installationPath}'`);
+      }
+
+      const cc = <any>await npm_config;
+
+      // change directory
+      process.chdir(this.installationPath);
+      progress.Progress.Dispatch(25);
+
       // set the prefix to the target location
       cc.localPrefix = extension.location;
       cc.globalPrefix = extension.location;
@@ -523,8 +531,8 @@ export class ExtensionManager {
         }
       }
 
+      progress.Message.Dispatch("[FYI- npm does not currently support progress... this may take a few moments]");
       // create the folder
-      progress.NotifyMessage(`Creating target folder: ${extension.location}`);
       await mkdir(extension.location);
 
       // acquire the write lock if we don't have it already
@@ -535,7 +543,17 @@ export class ExtensionManager {
         progress.NotifyMessage(`Running  npm install for ${pkg.name}, ${pkg.version}`);
 
         const results = npmInstall(pkg.name, pkg.version, extension.source, force || false);
-        ExtensionManager.criticalSection.exit();
+
+        if (ip_release) {
+          // release the global lock
+          const i = ip_release;
+          ip_release = null;
+          await i();
+          this.readLockRelease = await Lock.read(this.installationPath)
+          await Delay(1000);
+          await ExtensionManager.criticalSection.exit();
+        }
+
         await results;
         progress.NotifyMessage(`npm install completed ${pkg.name}, ${pkg.version}`);
       } else {
@@ -563,12 +581,24 @@ export class ExtensionManager {
       throw new PackageInstallationException(pkg.name, pkg.version, `${e}`);
     }
     finally {
-      process.chdir(cwd);
       progress.Progress.Dispatch(100);
       progress.End.Dispatch(null);
       if (release) {
         await release();
       }
+
+      // if we failed to release our global lock before...
+      if (ip_release) {
+        process.chdir(cwd);
+
+        // release the global lock
+        const i = ip_release;
+        ip_release = null;
+        await i();
+        this.readLockRelease = await Lock.read(this.installationPath);
+        await ExtensionManager.criticalSection.exit();
+      }
+
     }
   }
 
