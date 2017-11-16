@@ -368,9 +368,11 @@ export class ExtensionManager {
       throw new Exception("Extension manager has been disposed.")
     }
 
+    // get the exclusive lock
+    const release = await this.sharedLock.exclusive();
+
     try {
-      // get the exclusive lock
-      const release = await this.sharedLock.exclusive();
+
 
       // nuke the folder 
       await rmdir(this.installationPath);
@@ -378,10 +380,15 @@ export class ExtensionManager {
       // recreate the folder
       await mkdir(this.installationPath);
 
-      // drop the lock
-      release();
+
     } catch (e) {
+
+
       throw new ExtensionFolderLocked(this.installationPath);
+    }
+    finally {
+      // drop the lock
+      await release();
     }
   }
 
