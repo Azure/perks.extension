@@ -372,18 +372,12 @@ export class ExtensionManager {
     const release = await this.sharedLock.exclusive();
 
     try {
-
-
       // nuke the folder 
       await rmdir(this.installationPath);
 
       // recreate the folder
       await mkdir(this.installationPath);
-
-
     } catch (e) {
-
-
       throw new ExtensionFolderLocked(this.installationPath);
     }
     finally {
@@ -511,6 +505,7 @@ export class ExtensionManager {
         // force removal first
         try {
           progress.NotifyMessage(`Removing existing extension ${extension.location}`);
+          await Delay(100);
           await rmdir(extension.location);
         }
         catch (e) {
@@ -541,6 +536,7 @@ export class ExtensionManager {
       // clean up the attempted install directory
       if (await isDirectory(extension.location)) {
         progress.NotifyMessage(`Cleaning up failed installation: ${extension.location}`);
+        await Delay(100);
         await rmdir(extension.location);
       }
 
