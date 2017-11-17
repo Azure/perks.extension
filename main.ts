@@ -10,7 +10,7 @@ require.cache[require.resolve('npm/lib/utils/output')].exports = () => { };
 import { config, load, commands } from 'npm'
 import { spawn, ChildProcess } from 'child_process'
 import { readdir, isFile, readFile, exists, isDirectory, mkdir, rmdir, release } from '@microsoft.azure/async-io'
-import { Exception, shallowCopy, Mutex, SharedLock, Delay } from '@microsoft.azure/tasks'
+import { Exception, shallowCopy, Mutex, SharedLock, Delay, CriticalSection } from '@microsoft.azure/tasks'
 import { resolve as npmResolvePackage } from 'npm-package-arg'
 import { homedir, arch } from 'os';
 import * as semver from 'semver';
@@ -339,7 +339,6 @@ function resolveName(name: string, version: string) {
   }
 }
 
-
 export class ExtensionManager {
   private static instances: Array<ExtensionManager> = [];
 
@@ -460,7 +459,7 @@ export class ExtensionManager {
     return results;
   }
 
-
+  private static criticalSection = new CriticalSection();
 
   public async installPackage(pkg: Package, force?: boolean, maxWait: number = 5 * 60 * 1000, progressInit: Subscribe = () => { }): Promise<Extension> {
     if (!this.sharedLock) {
@@ -471,8 +470,11 @@ export class ExtensionManager {
 
     progress.Start.Dispatch(null);
 
-    // will throw if the exclusive lock can't be acquired.
-    const ex_release = await this.sharedLock.exclusive(maxWait);
+    // will throw if the CriticalSection lock can't be acquired.
+    // we need this so that only one extension at a time can start installing 
+    // in this process (since to use NPM right, we have to do a change dir before runinng it)
+    // if we ran NPM out-of-proc, this probably wouldn't be necessary.
+    const ex_release = await ExtensionManager.criticalSection.acquire(maxWait);
 
     if (!await exists(this.installationPath)) {
       await mkdir(this.installationPath);
