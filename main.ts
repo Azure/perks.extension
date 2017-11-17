@@ -9,8 +9,8 @@ require.cache[require.resolve('npm/lib/utils/output')].exports = () => { };
 
 import { config, load, commands } from 'npm'
 import { spawn, ChildProcess } from 'child_process'
-import { readdir, isFile, readFile, exists, isDirectory, mkdir, Lock, rmdir, release } from '@microsoft.azure/async-io'
-import { Exception, shallowCopy, CriticalSection, Delay } from '@microsoft.azure/tasks'
+import { readdir, isFile, readFile, exists, isDirectory, mkdir, rmdir, release } from '@microsoft.azure/async-io'
+import { Exception, shallowCopy, Mutex, SharedLock, Delay, CriticalSection } from '@microsoft.azure/tasks'
 import { resolve as npmResolvePackage } from 'npm-package-arg'
 import { homedir, arch } from 'os';
 import * as semver from 'semver';
@@ -339,7 +339,6 @@ function resolveName(name: string, version: string) {
   }
 }
 
-
 export class ExtensionManager {
   private static instances: Array<ExtensionManager> = [];
 
@@ -352,53 +351,41 @@ export class ExtensionManager {
     if (!await isDirectory(installationPath)) {
       throw new Exception(`Extension folder '${installationPath}' is not a valid directory`);
     }
+    const lock = new SharedLock(installationPath);
 
-    return new ExtensionManager(installationPath, await Lock.read(installationPath));
-  }
-  /*@internal*/ public static async disposeAll() {
-    for (const each of this.instances) {
-      each.dispose();
-    }
+    return new ExtensionManager(installationPath, lock, await lock.acquire());
   }
 
   public async dispose() {
-    const r = this.readLockRelease;
-    this.readLockRelease = async () => { };
-    await r();
+    await this.disposeLock();
+    this.disposeLock = async () => { };
+    this.sharedLock = null;
   }
 
   public async reset() {
-    // release the read lock on the folder
-    await this.readLockRelease();
-
-    // check if we can even get a lock
-    if (await Lock.check(this.installationPath)) {
-      // it's locked. can't reset.
-      throw new ExtensionFolderLocked(this.installationPath);
+    if (!this.sharedLock) {
+      throw new Exception("Extension manager has been disposed.")
     }
 
-    try {
-      // get the exclusive lock
-      const release = await Lock.exclusive(this.installationPath);
+    // get the exclusive lock
+    const release = await this.sharedLock.exclusive();
 
+    try {
       // nuke the folder 
       await rmdir(this.installationPath);
 
       // recreate the folder
       await mkdir(this.installationPath);
-
-      // drop the lock
-      release();
     } catch (e) {
-      throw (e);
-    } finally {
-      // add a read lock
-      this.readLockRelease = await Lock.read(this.installationPath)
+      throw new ExtensionFolderLocked(this.installationPath);
     }
-
+    finally {
+      // drop the lock
+      await release();
+    }
   }
 
-  private constructor(private installationPath: string, private readLockRelease: () => void) {
+  private constructor(private installationPath: string, private sharedLock: SharedLock | null, private disposeLock: () => Promise<void>) {
 
   }
 
@@ -472,34 +459,32 @@ export class ExtensionManager {
     return results;
   }
 
-  public static criticalSection = new CriticalSection();
+  private static criticalSection = new CriticalSection();
 
   public async installPackage(pkg: Package, force?: boolean, maxWait: number = 5 * 60 * 1000, progressInit: Subscribe = () => { }): Promise<Extension> {
+    if (!this.sharedLock) {
+      throw new Exception("Extension manager has been disposed.")
+    }
+
     const progress = new Progress(progressInit);
-    let release: release | null = null;
+
     progress.Start.Dispatch(null);
 
-    await ExtensionManager.criticalSection.enter();
+    // will throw if the CriticalSection lock can't be acquired.
+    // we need this so that only one extension at a time can start installing 
+    // in this process (since to use NPM right, we have to do a change dir before runinng it)
+    // if we ran NPM out-of-proc, this probably wouldn't be necessary.
+    const ex_release = await ExtensionManager.criticalSection.acquire(maxWait);
 
     if (!await exists(this.installationPath)) {
       await mkdir(this.installationPath);
     }
 
     const extension = new Extension(pkg, this.installationPath);
+    let release = await new Mutex(extension.location).acquire(maxWait / 2);
     const cwd = process.cwd();
 
-    // release the read lock on the folder
-    await this.readLockRelease();
-
-    // wait for an exclusive lock
-    let ip_release = await Lock.waitForExclusive(this.installationPath);
-
     try {
-      if (!ip_release) {
-        await ExtensionManager.criticalSection.exit();
-        throw new Exception(`Unable to lock Installation Path '${this.installationPath}'`);
-      }
-
       const cc = <any>await npm_config;
 
       // change directory
@@ -513,8 +498,6 @@ export class ExtensionManager {
       cc.force = force;
 
       if (await isDirectory(extension.location)) {
-        release = await Lock.waitForExclusive(extension.location);
-
         if (!force) {
           // already installed
           // if the target folder is created, we're going to make the naive assumption that the package is installed. (--force will blow away)
@@ -524,6 +507,7 @@ export class ExtensionManager {
         // force removal first
         try {
           progress.NotifyMessage(`Removing existing extension ${extension.location}`);
+          await Delay(100);
           await rmdir(extension.location);
         }
         catch (e) {
@@ -535,30 +519,16 @@ export class ExtensionManager {
       // create the folder
       await mkdir(extension.location);
 
-      // acquire the write lock if we don't have it already
-      release = release || await Lock.waitForExclusive(extension.location);
+      // run NPM INSTALL for the package.
+      progress.NotifyMessage(`Running  npm install for ${pkg.name}, ${pkg.version}`);
 
-      if (release) {
-        // run NPM INSTALL for the package.
-        progress.NotifyMessage(`Running  npm install for ${pkg.name}, ${pkg.version}`);
+      const results = npmInstall(pkg.name, pkg.version, extension.source, force || false);
 
-        const results = npmInstall(pkg.name, pkg.version, extension.source, force || false);
+      await ex_release();
 
-        if (ip_release) {
-          // release the global lock
-          const i = ip_release;
-          ip_release = null;
-          await i();
-          this.readLockRelease = await Lock.read(this.installationPath)
-          await Delay(1000);
-          await ExtensionManager.criticalSection.exit();
-        }
+      await results;
+      progress.NotifyMessage(`npm install completed ${pkg.name}, ${pkg.version}`);
 
-        await results;
-        progress.NotifyMessage(`npm install completed ${pkg.name}, ${pkg.version}`);
-      } else {
-        throw new Exception("NO LOCK.")
-      }
       return extension;
     } catch (e) {
       progress.NotifyMessage(e);
@@ -567,14 +537,14 @@ export class ExtensionManager {
       }
       // clean up the attempted install directory
       if (await isDirectory(extension.location)) {
-        progress.NotifyMessage(`Cleanin up failed installation: ${extension.location}`);
+        progress.NotifyMessage(`Cleaning up failed installation: ${extension.location}`);
+        await Delay(100);
         await rmdir(extension.location);
       }
 
       if (e instanceof Exception) {
         throw e
       }
-
       if (e instanceof Error) {
         throw new PackageInstallationException(pkg.name, pkg.version, e.message + e.stack);
       }
@@ -583,34 +553,15 @@ export class ExtensionManager {
     finally {
       progress.Progress.Dispatch(100);
       progress.End.Dispatch(null);
-      if (release) {
-        await release();
-      }
-
-      // if we failed to release our global lock before...
-      if (ip_release) {
-        process.chdir(cwd);
-
-        // release the global lock
-        const i = ip_release;
-        ip_release = null;
-        await i();
-        this.readLockRelease = await Lock.read(this.installationPath);
-        await ExtensionManager.criticalSection.exit();
-      }
-
+      await Promise.all([ex_release(), release()]);
     }
   }
 
   public async removeExtension(extension: Extension): Promise<void> {
     if (await isDirectory(extension.location)) {
-      const release = await Lock.waitForExclusive(extension.location);
-      if (release) {
-        await rmdir(extension.location);
-        await release();
-      } else {
-        throw new Exception(`Unable to remove extension from '${extension.location}' .`);
-      }
+      let release = await new Mutex(extension.location).acquire();
+      await rmdir(extension.location);
+      await release();
     }
   }
 
@@ -648,9 +599,3 @@ export class ExtensionManager {
     return spawn(fullCommandPath, command.slice(1), { env: env, cwd: extension.modulePath });
   }
 }
-
-// Try to ensure that everything is cleaned up at the end of this process.
-process
-  .once('SIGINT', () => process.exit(1))
-  .once('SIGTERM', () => process.exit(1))
-  .once('exit', ExtensionManager.disposeAll);

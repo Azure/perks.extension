@@ -22,7 +22,12 @@ import { ExtensionManager, UnresolvedPackageException, InvalidPackageIdentityExc
   async after() {
     try {
       await this.extensionManager.dispose();
-      await asyncio.rmdir(this.tmpFolder);
+      try {
+        await tasks.Delay(500);
+        await asyncio.rmdir(this.tmpFolder);
+      } catch (E) {
+        console.error("rmdir is giving grief... [probably intermittent]")
+      }
     } catch (e) {
       console.error("ABORTING\n");
       console.error(e);
@@ -38,7 +43,7 @@ import { ExtensionManager, UnresolvedPackageException, InvalidPackageIdentityExc
       console.log("Installing Once");
       // install it once
       const dni = await this.extensionManager.findPackage("echo-cli", "*");
-      const installing = this.extensionManager.installPackage(dni, false, 30000, (i) => i.Message.Subscribe((s, m) => { console.log(`Installer:${m}`) }));
+      const installing = this.extensionManager.installPackage(dni, false, 60000, (i) => i.Message.Subscribe((s, m) => { console.log(`Installer:${m}`) }));
       const extension = await installing;
       assert.notEqual(await extension.configuration, "");
     }
@@ -48,11 +53,11 @@ import { ExtensionManager, UnresolvedPackageException, InvalidPackageIdentityExc
       console.log("Attempt Overwrite")
       // install/overwrite
       const dni = await this.extensionManager.findPackage("echo-cli", "*");
-      const installing = this.extensionManager.installPackage(dni, true, 30000, (i) => i.Message.Subscribe((s, m) => { console.log(`Installer2:${m}`) }));
+      const installing = this.extensionManager.installPackage(dni, true, 60000, (i) => i.Message.Subscribe((s, m) => { console.log(`Installer2:${m}`) }));
 
       // install at the same time?
       const dni2 = await this.extensionManager.findPackage("echo-cli", "*");
-      const installing2 = this.extensionManager.installPackage(dni2, true, 30000, (i) => i.Message.Subscribe((s, m) => { console.log(`Installer3:${m}`) }));
+      const installing2 = this.extensionManager.installPackage(dni2, true, 60000, (i) => i.Message.Subscribe((s, m) => { console.log(`Installer3:${m}`) }));
 
       // wait for it.
       const extension = await installing;
@@ -195,5 +200,6 @@ import { ExtensionManager, UnresolvedPackageException, InvalidPackageIdentityExc
       // oh well...
     }
   }
+
 
 }

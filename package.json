@@ -44,7 +44,7 @@
   "dependencies": {
     "@microsoft.azure/async-io": "^2.0.13",
     "@microsoft.azure/eventing": "^2.0.4",
-    "@microsoft.azure/tasks": "^2.0.12",
+    "@microsoft.azure/tasks": "^2.0.15",
     "hosted-git-info": "^2.4.2",
     "memorystream": "~0.3.1",
     "npm": "5.5.1",
