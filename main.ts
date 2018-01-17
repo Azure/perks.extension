@@ -566,6 +566,7 @@ export class ExtensionManager {
   }
 
   public async start(extension: Extension): Promise<ChildProcess> {
+    const PathVar = getPathVariableName();
     // look at the extension for the 
     if (!extension.definition.scripts || !extension.definition.scripts.start) {
       throw new MissingStartCommandException(extension);
@@ -578,8 +579,8 @@ export class ExtensionManager {
     let env = shallowCopy(process.env);
 
     // add potential .bin folders (depends on platform and npm version)
-    env[getPathVariableName()] = `${path.join(extension.modulePath, "node_modules", ".bin")}${path.delimiter}${env[getPathVariableName()]}`;
-    env[getPathVariableName()] = `${path.join(extension.location, "node_modules", ".bin")}${path.delimiter}${env[getPathVariableName()]}`;
+    env[PathVar] = `${path.join(extension.modulePath, "node_modules", ".bin")}${path.delimiter}${env[PathVar]}`;
+    env[PathVar] = `${path.join(extension.location, "node_modules", ".bin")}${path.delimiter}${env[PathVar]}`;
 
     if (command[0] == 'node' || command[0] == "node.exe") {
       command[0] = nodePath;
@@ -596,6 +597,27 @@ export class ExtensionManager {
     }
 
     // console.log(`cmdline ${fullCommandPath} ${command.slice(1).join(' ')}`);
+
+    // == special case == 
+    // on Windows, if this command has a space in the name, and it's not an .EXE
+    // then we're going to have to add the folder to the PATH
+    // and execute it by just the filename 
+    // and set the path back when we're done.
+    if (process.platform === 'win32' && fullCommandPath.indexOf(' ') > -1 && !/.exe$/ig.exec(fullCommandPath)) {
+      // preserve the current path
+      const originalPath = process.env[PathVar];
+      try {
+        // insert the dir into the path
+        process.env[PathVar] = `${path.dirname(fullCommandPath)}${path.delimiter}${env[PathVar]}`;
+
+        // call spawn and return
+        return spawn(path.basename(fullCommandPath), command.slice(1), { env: env, cwd: extension.modulePath });
+      } finally {
+        // regardless, restore the original path on the way out!
+        process.env[PathVar] = originalPath;
+      }
+    }
+
     return spawn(fullCommandPath, command.slice(1), { env: env, cwd: extension.modulePath });
   }
 }
