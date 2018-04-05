@@ -13,7 +13,7 @@ import { ExtensionManager, UnresolvedPackageException, InvalidPackageIdentityExc
 
   private tmpFolder = fs.mkdtempSync(`${fs.mkdtempSync(`${os.tmpdir()}/test`)}/install-pkg`);
 
-  extensionManager: ExtensionManager;
+  extensionManager!: ExtensionManager;
 
   async before() {
     this.extensionManager = await ExtensionManager.Create(this.tmpFolder);
