@@ -105,7 +105,7 @@ export class ExtensionFolderLocked extends Exception {
 function cmdlineToArray(text: string, result: Array<string> = [], matcher = /[^\s"]+|"([^"]*)"/gi, count = 0): Array<string> {
   text = text.replace(/\\"/g, "\ufffe");
   const match = matcher.exec(text);
-  return match ? cmdlineToArray(text, result, matcher, result.push(match[1] ? match[1].replace(/\ufffe/g, '\\"', ) : match[0].replace(/\ufffe/g, '\\"', ))) : result;
+  return match ? cmdlineToArray(text, result, matcher, result.push(match[1] ? match[1].replace(/\ufffe/g, '\\"') : match[0].replace(/\ufffe/g, '\\"'))) : result;
 }
 
 function getPathVariableName() {
@@ -611,13 +611,13 @@ export class ExtensionManager {
         process.env[PathVar] = `${path.dirname(fullCommandPath)}${path.delimiter}${env[PathVar]}`;
 
         // call spawn and return
-        return spawn(path.basename(fullCommandPath), command.slice(1), { env: env, cwd: extension.modulePath });
+        return spawn(path.basename(fullCommandPath), command.slice(1), { env: env, cwd: extension.modulePath, stdio: ["pipe", "pipe", "pipe"] });
       } finally {
         // regardless, restore the original path on the way out!
         process.env[PathVar] = originalPath;
       }
     }
 
-    return spawn(fullCommandPath, command.slice(1), { env: env, cwd: extension.modulePath });
+    return spawn(fullCommandPath, command.slice(1), { env: env, cwd: extension.modulePath, stdio: ["pipe", "pipe", "pipe"] });
   }
 }
