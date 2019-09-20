@@ -37,7 +37,7 @@
     "yarn": "^1.3.2",
     "@types/npm": "^2.0.28",
     "mocha-typescript": "1.1.17",
-    "@types/node": "10.9.4",
+    "@types/node": "^10.0.0",
     "mocha": "^5.0.0",
     "typescript": "^3.0.0"
   },
